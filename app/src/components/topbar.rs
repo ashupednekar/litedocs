@@ -16,6 +16,14 @@ fn file_url_from_input(value: &str) -> String {
     format!("file://{raw}")
 }
 
+fn js_escape(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('\"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
 #[component]
 pub fn TopBar(mut dark_mode: Signal<bool>, mut vim_mode: Signal<bool>) -> Element {
     let mut show_auth_modal = use_signal(|| false);
@@ -24,6 +32,7 @@ pub fn TopBar(mut dark_mode: Signal<bool>, mut vim_mode: Signal<bool>) -> Elemen
     let mut profile_pic_preview = use_signal(String::new);
     let mut has_pic_upload = use_signal(|| false);
     let mut crop_applied = use_signal(|| false);
+    let mut auth_status = use_signal(String::new);
 
     rsx! {
         header {
@@ -122,7 +131,7 @@ pub fn TopBar(mut dark_mode: Signal<bool>, mut vim_mode: Signal<bool>) -> Elemen
                     class: "auth-modal",
                     onclick: move |evt| evt.stop_propagation(),
                     div { class: "auth-header", "Sign in (Placeholder)" }
-                    p { class: "auth-sub", "WebAuthn endpoint wiring will be added later." }
+                    p { class: "auth-sub", "WebAuthn wired to local server at http://127.0.0.1:8080." }
                     label { class: "auth-label", "Display name" }
                     input {
                         class: "auth-input",
@@ -228,9 +237,124 @@ pub fn TopBar(mut dark_mode: Signal<bool>, mut vim_mode: Signal<bool>) -> Elemen
                         }
                         button {
                             class: "primary",
-                            onclick: move |_| show_auth_modal.set(false),
+                            onclick: move |_| {
+                                let name = profile_name();
+                                if name.trim().is_empty() {
+                                    auth_status.set("Name is required".to_string());
+                                    return;
+                                }
+                                auth_status.set("Starting WebAuthn registration...".to_string());
+                                let mut auth_status = auth_status;
+                                let name_js = js_escape(&name);
+                                spawn(async move {
+                                    let script = format!(
+                                        r#"(async function() {{
+  const base = "http://127.0.0.1:8080";
+  const b64urlToBuf = (s) => {{
+    const pad = "=".repeat((4 - (s.length % 4)) % 4);
+    const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out.buffer;
+  }};
+  const bufToB64url = (buf) => {{
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  }};
+  const regStart = await fetch(base + "/api/webauthn/register/start", {{
+    method: "POST",
+    headers: {{ "Content-Type": "application/json" }},
+    body: JSON.stringify({{ name: "{name_js}" }})
+  }});
+  if (!regStart.ok) {{
+    return "Registration start failed: " + regStart.status;
+  }}
+  const regStartJson = await regStart.json();
+  const creation = regStartJson.challenge;
+  creation.publicKey.challenge = b64urlToBuf(creation.publicKey.challenge);
+  creation.publicKey.user.id = b64urlToBuf(creation.publicKey.user.id);
+  if (Array.isArray(creation.publicKey.excludeCredentials)) {{
+    creation.publicKey.excludeCredentials = creation.publicKey.excludeCredentials.map((c) => ({{ ...c, id: b64urlToBuf(c.id) }}));
+  }}
+  const att = await navigator.credentials.create({{ publicKey: creation.publicKey }});
+  if (!att) {{
+    return "Registration cancelled";
+  }}
+  const regPayload = {{
+    id: att.id,
+    rawId: bufToB64url(att.rawId),
+    type: att.type,
+    response: {{
+      attestationObject: bufToB64url(att.response.attestationObject),
+      clientDataJSON: bufToB64url(att.response.clientDataJSON),
+      transports: att.response.getTransports ? att.response.getTransports() : []
+    }},
+    clientExtensionResults: att.getClientExtensionResults ? att.getClientExtensionResults() : {{}}
+  }};
+  const regFinish = await fetch(base + "/api/webauthn/register/finish", {{
+    method: "POST",
+    headers: {{ "Content-Type": "application/json" }},
+    body: JSON.stringify({{ name: "{name_js}", credential: regPayload }})
+  }});
+  if (!regFinish.ok) {{
+    return "Registration finish failed: " + regFinish.status;
+  }}
+  const authStart = await fetch(base + "/api/webauthn/auth/start", {{
+    method: "POST",
+    headers: {{ "Content-Type": "application/json" }},
+    body: JSON.stringify({{ name: "{name_js}" }})
+  }});
+  if (!authStart.ok) {{
+    return "Auth start failed: " + authStart.status;
+  }}
+  const authStartJson = await authStart.json();
+  const request = authStartJson.challenge;
+  request.publicKey.challenge = b64urlToBuf(request.publicKey.challenge);
+  if (Array.isArray(request.publicKey.allowCredentials)) {{
+    request.publicKey.allowCredentials = request.publicKey.allowCredentials.map((c) => ({{ ...c, id: b64urlToBuf(c.id) }}));
+  }}
+  const assertion = await navigator.credentials.get({{ publicKey: request.publicKey }});
+  if (!assertion) {{
+    return "Authentication cancelled";
+  }}
+  const authPayload = {{
+    id: assertion.id,
+    rawId: bufToB64url(assertion.rawId),
+    type: assertion.type,
+    response: {{
+      authenticatorData: bufToB64url(assertion.response.authenticatorData),
+      clientDataJSON: bufToB64url(assertion.response.clientDataJSON),
+      signature: bufToB64url(assertion.response.signature),
+      userHandle: assertion.response.userHandle ? bufToB64url(assertion.response.userHandle) : null
+    }},
+    clientExtensionResults: assertion.getClientExtensionResults ? assertion.getClientExtensionResults() : {{}}
+  }};
+  const authFinish = await fetch(base + "/api/webauthn/auth/finish", {{
+    method: "POST",
+    headers: {{ "Content-Type": "application/json" }},
+    body: JSON.stringify({{ name: "{name_js}", credential: authPayload }})
+  }});
+  if (!authFinish.ok) {{
+    return "Auth finish failed: " + authFinish.status;
+  }}
+  return "WebAuthn registration + sign-in complete";
+}})()"#,
+                                        name_js = name_js
+                                    );
+                                    match document::eval(&script).join::<String>().await {
+                                        Ok(msg) => auth_status.set(msg),
+                                        Err(_) => auth_status.set("Failed to call auth server".to_string()),
+                                    }
+                                });
+                            },
                             "Continue"
                         }
+                    }
+                    if !auth_status().is_empty() {
+                        p { class: "auth-file-hint", "{auth_status}" }
                     }
                 }
             }

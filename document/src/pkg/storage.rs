@@ -3,6 +3,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::internal::naming::{doc_id_from_title, title_from_doc_id};
+
 pub trait FileStorage {
     fn read(&self, doc_id: &str) -> io::Result<Vec<u8>>;
 
@@ -42,8 +44,9 @@ pub struct LocalFileStorage {
 
 impl Default for LocalFileStorage {
     fn default() -> Self {
-        let root = default_storage_root();
-        Self { root }
+        Self {
+            root: default_storage_root(),
+        }
     }
 }
 
@@ -53,21 +56,7 @@ impl LocalFileStorage {
     }
 
     pub fn doc_id_from_title(title: &str) -> String {
-        let mut out = String::new();
-        for ch in title.chars() {
-            if ch.is_ascii_alphanumeric() {
-                out.push(ch.to_ascii_lowercase());
-            } else if (ch.is_ascii_whitespace() || ch == '-' || ch == '_') && !out.ends_with('-') {
-                out.push('-');
-            }
-        }
-
-        let trimmed = out.trim_matches('-').to_string();
-        if trimmed.is_empty() {
-            "untitled".to_string()
-        } else {
-            trimmed
-        }
+        doc_id_from_title(title)
     }
 
     fn docs_dir(&self) -> PathBuf {
@@ -83,29 +72,6 @@ impl LocalFileStorage {
             fs::create_dir_all(parent)?;
         }
         Ok(())
-    }
-
-    fn title_from_doc_id(doc_id: &str) -> String {
-        let mut out = String::new();
-        let mut capitalize = true;
-        for ch in doc_id.chars() {
-            if ch == '-' || ch == '_' {
-                out.push(' ');
-                capitalize = true;
-                continue;
-            }
-            if capitalize {
-                out.push(ch.to_ascii_uppercase());
-                capitalize = false;
-            } else {
-                out.push(ch);
-            }
-        }
-        if out.trim().is_empty() {
-            "Untitled".to_string()
-        } else {
-            out
-        }
     }
 }
 
@@ -168,7 +134,7 @@ impl FileStorage for LocalFileStorage {
             let metadata = fs::metadata(&path)?;
             let updated_at = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
             docs.push(StoredDoc {
-                title: Self::title_from_doc_id(&id),
+                title: title_from_doc_id(&id),
                 id,
                 updated_at,
             });

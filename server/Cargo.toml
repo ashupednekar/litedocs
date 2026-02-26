@@ -1,0 +1,22 @@
+[package]
+name = "litedocs-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# TODO(webauthn): re-evaluate `passkey-rs` vs `webauthn-rs` after initial server rollout.
+axum = "0.7"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+tokio = { workspace = true }
+uuid = { version = "1", features = ["serde", "v4"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+standard-error = "0.1"
+config = "0.14"
+lazy_static = "1"
+async-trait = "0.1"
+url = "2"
+webauthn-rs = "0.5"
+tower-http = { version = "0.5", features = ["cors"] }

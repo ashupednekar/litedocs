@@ -1,0 +1,9 @@
+errors:
+  - code: ER-0001
+    detail_en_US: "Internal server error"
+  - code: ER-0004
+    detail_en_US: "Invalid request input"
+  - code: ER-AXUM-BADREQUEST
+    detail_en_US: "Bad request"
+  - code: ER-AXUM-NOTFOUND
+    detail_en_US: "Resource not found"

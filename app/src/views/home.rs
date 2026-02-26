@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
+use litedocs_document::{FileStorage, LocalFileStorage};
 use std::time::{Duration, SystemTime};
 
 use crate::components::{DocItem, EditorView, LibraryView, StatusBar, TemplateItem, TopBar, VimMode};
-use crate::internal::files::{FileStorage, LocalFileStorage};
 
 #[derive(Clone, PartialEq)]
 enum ActiveView {

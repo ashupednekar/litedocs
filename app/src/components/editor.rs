@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use keyboard_types::Key;
+use litedocs_document::{FileStorage, LocalFileStorage};
 use pulldown_cmark::{html, Options, Parser};
 use std::time::Duration;
 
 use crate::components::VimMode;
-use crate::internal::files::{FileStorage, LocalFileStorage};
 
 const DEFAULT_DOC_CONTENT: &str = "## Overview\n\nStart writing in **Markdown**. Preview updates live below.\n\n- Local-first notes\n- Vim motions (when enabled)\n- Clean export\n\n> Tip: Use headings and lists to structure ideas.\n";
 
