@@ -47,6 +47,11 @@ fn markdown_to_html(markdown: &str) -> String {
     html_out
 }
 
+const READ_DOC_SURFACE_HTML_JS: &str = r#"(function() {
+  const el = document.getElementById("doc-surface");
+  return el ? el.innerHTML : "";
+})()"#;
+
 fn insert_into_textarea(prefix: &str, suffix: &str, placeholder: &str) {
     let prefix = js_escape(prefix);
     let suffix = js_escape(suffix);
@@ -112,6 +117,10 @@ pub fn EditorView(
     let mut content = use_signal(|| DEFAULT_DOC_CONTENT.to_string());
     let mut autosave_status = use_signal(|| "Autosaving locally".to_string());
     let mut save_revision = use_signal(|| 0_u64);
+    let stable_doc_id = use_signal(move || {
+        active_doc_id()
+            .unwrap_or_else(|| doc_id_from_title(&doc_title()))
+    });
     let storage = use_hook(LocalFileStorage::default);
     let mut insert_markdown_owned = move |value: String| {
         if rich_mode() {
@@ -220,12 +229,48 @@ pub fn EditorView(
 
     let storage_for_load = storage.clone();
     let storage_for_save = storage.clone();
+    let storage_for_back = storage.clone();
+    let storage_for_manual = storage.clone();
+    let manual_save = {
+        let storage = storage_for_manual.clone();
+        let stable_doc_id = stable_doc_id;
+        let autosave_status = autosave_status.clone();
+        let mut content_signal = content.clone();
+        let last_html_signal = last_html.clone();
+        let rich_mode_signal = rich_mode.clone();
+
+        move |_: MouseEvent| {
+            let doc_id = stable_doc_id();
+            let rich = rich_mode_signal();
+            let mut snapshot = content_signal();
+            let mut autosave_status = autosave_status.clone();
+            let storage = storage.clone();
+            let mut last_html = last_html_signal.clone();
+
+            spawn(async move {
+                if rich {
+                    if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
+                        .join::<String>()
+                        .await
+                    {
+                        last_html.set(html_value.clone());
+                        snapshot = html2md::parse_html(&html_value);
+                        content_signal.set(snapshot.clone());
+                    }
+                }
+
+                match storage.write_full(&doc_id, snapshot.as_bytes()) {
+                    Ok(()) => autosave_status.set("Saved locally".to_string()),
+                    Err(err) => autosave_status.set(format!("Save failed: {err}")),
+                }
+            });
+        }
+    };
 
     // Load local draft when the active document title changes.
     use_effect(move || {
-        let title = doc_title();
-        let doc_id = active_doc_id()
-            .unwrap_or_else(|| doc_id_from_title(&title));
+        let _ = doc_title();
+        let doc_id = stable_doc_id();
 
         match storage_for_load.read(&doc_id) {
             Ok(bytes) if !bytes.is_empty() => {
@@ -246,17 +291,21 @@ pub fn EditorView(
 
     // Debounced local-first autosave after user inactivity.
     use_effect(move || {
-        let title = doc_title();
+        let _ = doc_title();
         let text = content();
-        let doc_id = active_doc_id()
-            .unwrap_or_else(|| doc_id_from_title(&title));
-        *save_revision.write() += 1;
-        let revision = save_revision();
+        let doc_id = stable_doc_id();
+        let rich = rich_mode();
+        let revision = save_revision.with_mut(|rev| {
+            *rev += 1;
+            *rev
+        });
         autosave_status.set("Autosaving locally...".to_string());
 
         let mut autosave_status = autosave_status;
         let save_revision = save_revision;
         let storage = storage_for_save.clone();
+        let mut content = content;
+        let mut last_html = last_html;
 
         spawn(async move {
             tokio::time::sleep(Duration::from_millis(900)).await;
@@ -264,7 +313,21 @@ pub fn EditorView(
                 return;
             }
 
-            match storage.write_full(&doc_id, text.as_bytes()) {
+            let mut payload = text;
+            if rich {
+                if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
+                    .join::<String>()
+                    .await
+                {
+                    if html_value != last_html() {
+                        last_html.set(html_value.clone());
+                    }
+                    payload = html2md::parse_html(&html_value);
+                    content.set(payload.clone());
+                }
+            }
+
+            match storage.write_full(&doc_id, payload.as_bytes()) {
                 Ok(()) => autosave_status.set("Saved locally".to_string()),
                 Err(err) => autosave_status.set(format!("Save failed: {err}")),
             }
@@ -296,7 +359,42 @@ pub fn EditorView(
             div { class: "doc-actions",
                 button {
                     class: "ghost compact-back",
-                    onclick: move |_| on_back.call(()),
+                    onclick: move |_| {
+                        let doc_id = stable_doc_id();
+                        let current_text = content();
+                        let mut autosave_status = autosave_status;
+                        let storage = storage_for_back.clone();
+                        let on_back = on_back.clone();
+
+                        if rich_mode() {
+                            let mut content = content;
+                            let mut last_html = last_html;
+                            spawn(async move {
+                                let markdown = match document::eval(READ_DOC_SURFACE_HTML_JS)
+                                    .join::<String>()
+                                    .await
+                                {
+                                    Ok(html_value) => {
+                                        last_html.set(html_value.clone());
+                                        html2md::parse_html(&html_value)
+                                    }
+                                    Err(_) => current_text,
+                                };
+                                content.set(markdown.clone());
+                                match storage.write_full(&doc_id, markdown.as_bytes()) {
+                                    Ok(()) => autosave_status.set("Saved locally".to_string()),
+                                    Err(err) => autosave_status.set(format!("Save failed: {err}")),
+                                }
+                                on_back.call(());
+                            });
+                        } else {
+                            match storage.write_full(&doc_id, current_text.as_bytes()) {
+                                Ok(()) => autosave_status.set("Saved locally".to_string()),
+                                Err(err) => autosave_status.set(format!("Save failed: {err}")),
+                            }
+                            on_back.call(());
+                        }
+                    },
                     "← Back to library"
                 }
             }
@@ -404,13 +502,40 @@ pub fn EditorView(
             div { class: "toggle-group",
                 button {
                     class: if !rich_mode() { "active" } else { "" },
-                    onclick: move |_| rich_mode.set(false),
+                    onclick: move |_| {
+                        if rich_mode() {
+                            let mut content = content;
+                            let mut last_html = last_html;
+                            let mut rich_mode = rich_mode;
+                            spawn(async move {
+                                if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
+                                    .join::<String>()
+                                    .await
+                                {
+                                    last_html.set(html_value.clone());
+                                    content.set(html2md::parse_html(&html_value));
+                                }
+                                rich_mode.set(false);
+                            });
+                        } else {
+                            rich_mode.set(false);
+                        }
+                    },
                     "Markdown"
                 }
                 button {
                     class: if rich_mode() { "active" } else { "" },
                     onclick: move |_| rich_mode.set(true),
                     "Doc"
+                }
+                button {
+                    class: "ghost icon-btn save-btn",
+                    title: "Save now",
+                    onclick: manual_save,
+                    img {
+                        src: asset!("/assets/icons/save.svg"),
+                        alt: "Save icon"
+                    }
                 }
             }
         }
@@ -601,9 +726,7 @@ pub fn EditorView(
                             let mut content = content;
                             let mut last_html = last_html;
                             spawn(async move {
-                                if let Ok(html_value) = document::eval(
-                                    r#"document.getElementById("doc-surface")?.innerHTML || """#,
-                                )
+                                if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
                                 .join::<String>()
                                 .await
                                 {
@@ -614,7 +737,20 @@ pub fn EditorView(
                                     }
                                 }
                             });
-                        }
+                        },
+                        onblur: move |_| {
+                            let mut content = content;
+                            let mut last_html = last_html;
+                            spawn(async move {
+                                if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
+                                    .join::<String>()
+                                    .await
+                                {
+                                    last_html.set(html_value.clone());
+                                    content.set(html2md::parse_html(&html_value));
+                                }
+                            });
+                        },
                     }
                 }
             } else {

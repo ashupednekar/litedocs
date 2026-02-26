@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use litedocs_document::{FileStorage, LocalFileStorage};
+use litedocs_document::{doc_id_from_title, FileStorage, LocalFileStorage};
 use std::time::{Duration, SystemTime};
 
 use crate::components::{DocItem, EditorView, LibraryView, StatusBar, TemplateItem, TopBar, VimMode};
@@ -75,13 +75,17 @@ pub fn Home() -> Element {
                                 .duration_since(SystemTime::UNIX_EPOCH)
                                 .unwrap_or(Duration::from_secs(0))
                                 .as_secs();
-                            active_doc_id.set(None);
-                            doc_title.set(format!("Untitled {ts}"));
+                            let title = format!("Untitled {ts}");
+                            active_doc_id.set(Some(doc_id_from_title(&title)));
+                            doc_title.set(title);
                             view.set(ActiveView::Editor);
                         },
                         on_delete: move |doc_id: String| {
-                            let _ = storage_for_delete.delete(&doc_id);
-                            recent_docs.set(load_recent_docs(&storage_for_delete));
+                            if let Err(err) = storage_for_delete.delete(&doc_id) {
+                                eprintln!("Failed to delete document {doc_id}: {err}");
+                            } else {
+                                recent_docs.set(load_recent_docs(&storage_for_delete));
+                            }
                         },
                     }
                 } else {
@@ -119,9 +123,21 @@ fn format_updated(updated_at: SystemTime) -> String {
     let now = SystemTime::now();
     match now.duration_since(updated_at) {
         Ok(age) if age.as_secs() < 60 => "Edited just now".to_string(),
-        Ok(age) if age.as_secs() < 3600 => format!("Edited {} min ago", age.as_secs() / 60),
-        Ok(age) if age.as_secs() < 86_400 => format!("Edited {} hours ago", age.as_secs() / 3600),
-        Ok(age) => format!("Edited {} days ago", age.as_secs() / 86_400),
+        Ok(age) if age.as_secs() < 3600 => {
+            let minutes = age.as_secs() / 60;
+            let unit = if minutes == 1 { "minute" } else { "minutes" };
+            format!("Edited {minutes} {unit} ago")
+        }
+        Ok(age) if age.as_secs() < 86_400 => {
+            let hours = age.as_secs() / 3600;
+            let unit = if hours == 1 { "hour" } else { "hours" };
+            format!("Edited {hours} {unit} ago")
+        }
+        Ok(age) => {
+            let days = age.as_secs() / 86_400;
+            let unit = if days == 1 { "day" } else { "days" };
+            format!("Edited {days} {unit} ago")
+        }
         Err(_) => "Edited recently".to_string(),
     }
 }

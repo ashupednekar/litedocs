@@ -1,5 +1,9 @@
 use dioxus::prelude::*;
 
+/// `file_url_from_input` is only a best-effort fallback for non-browser or
+/// legacy scenarios. Browsers typically hide real file paths for security, so
+/// the preferred preview path is the `onchange` blob URL from
+/// `URL.createObjectURL`.
 fn file_url_from_input(value: &str) -> String {
     let raw = value.trim();
     if raw.is_empty() || raw.contains("fakepath") {
@@ -41,8 +45,16 @@ pub fn TopBar(mut dark_mode: Signal<bool>, mut vim_mode: Signal<bool>) -> Elemen
                 class: "topbar-inner",
                 div {
                     class: "brand",
-                    div { class: "mark" }
-                    span { class: "brand-name", "Litedocs" }
+                    img {
+                        class: "brand-logo",
+                        src: asset!("/assets/logo.svg"),
+                        alt: "Litedocs logo",
+                    }
+                    div {
+                        class: "brand-text",
+                        span { class: "brand-name", "Litedocs" }
+                        span { class: "brand-tagline", "Local-first writing hub" }
+                    }
                 }
                 div {
                     class: "top-search",
@@ -170,7 +182,9 @@ pub fn TopBar(mut dark_mode: Signal<bool>, mut vim_mode: Signal<bool>) -> Elemen
                                 .join::<String>()
                                 .await
                                 {
-                                    profile_pic_preview.set(blob_url);
+                                    if !blob_url.is_empty() {
+                                        profile_pic_preview.set(blob_url);
+                                    }
                                 }
                             });
                         },

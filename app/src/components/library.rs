@@ -22,6 +22,8 @@ pub fn LibraryView(
     on_create: EventHandler<()>,
     on_delete: EventHandler<String>,
 ) -> Element {
+    let limited_recent: Vec<DocItem> = recent.iter().take(6).cloned().collect();
+    let total_recent = recent.len();
     rsx! {
         div { class: "library-view",
             div { class: "library-header",
@@ -40,30 +42,36 @@ pub fn LibraryView(
                 if recent.is_empty() {
                     div { class: "empty-state", "No local docs yet. Create one to get started." }
                 } else {
-                    div { class: "doc-grid",
-                        for item in recent.iter() {
-                            div {
-                                class: "doc-card",
-                                button {
-                                    class: "doc-open",
-                                    onclick: {
-                                        let on_open = on_open.clone();
-                                        let id = item.id.clone();
-                                        move |_| on_open.call(id.clone())
-                                    },
-                                    div { class: "doc-title", "{item.title}" }
-                                    div { class: "doc-meta", "{item.meta} · {item.location}" }
-                                }
-                                button {
-                                    class: "doc-delete",
-                                    onclick: {
-                                        let on_delete = on_delete.clone();
-                                        let id = item.id.clone();
-                                        move |_| on_delete.call(id.clone())
-                                    },
-                                    "Delete"
+                    div { class: "doc-scroll",
+                        div { class: "doc-grid",
+                            for item in limited_recent.iter() {
+                                div {
+                                    key: "{item.id}",
+                                    class: "doc-card",
+                                    button {
+                                        class: "doc-open",
+                                        onclick: {
+                                            let on_open = on_open.clone();
+                                            let id = item.id.clone();
+                                            move |_| on_open.call(id.clone())
+                                        },
+                                        div { class: "doc-title", "{item.title}" }
+                                        div { class: "doc-meta", "{item.meta} · {item.location}" }
+                                    }
+                                    button {
+                                        class: "doc-delete",
+                                        onclick: {
+                                            let on_delete = on_delete.clone();
+                                            let id = item.id.clone();
+                                            move |_| on_delete.call(id.clone())
+                                        },
+                                        "Delete"
+                                    }
                                 }
                             }
+                        }
+                        if total_recent > limited_recent.len() {
+                            div { class: "doc-more", "Showing {limited_recent.len()} of {total_recent} · scroll to see earlier" }
                         }
                     }
                 }
