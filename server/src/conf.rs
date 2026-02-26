@@ -41,5 +41,6 @@ fn default_rp_origin() -> String {
 }
 
 lazy_static! {
+    // Loaded once from env and reused across command/runtime paths.
     pub static ref SETTINGS: Settings = Settings::new().expect("invalid server settings");
 }

@@ -48,8 +48,8 @@ pub fn LibraryView(
                                     class: "doc-open",
                                     onclick: {
                                         let on_open = on_open.clone();
-                                        let title = item.title.clone();
-                                        move |_| on_open.call(title.clone())
+                                        let id = item.id.clone();
+                                        move |_| on_open.call(id.clone())
                                     },
                                     div { class: "doc-title", "{item.title}" }
                                     div { class: "doc-meta", "{item.meta} · {item.location}" }

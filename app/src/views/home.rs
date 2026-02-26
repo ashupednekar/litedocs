@@ -15,6 +15,7 @@ enum ActiveView {
 pub fn Home() -> Element {
     let mut view = use_signal(|| ActiveView::Library);
     let mut doc_title = use_signal(|| "Untitled".to_string());
+    let mut active_doc_id = use_signal(|| Option::<String>::None);
     let dark_mode = use_signal(|| false);
     let vim_enabled = use_signal(|| false);
     let vim_mode = use_signal(|| VimMode::Normal);
@@ -59,8 +60,14 @@ pub fn Home() -> Element {
                     LibraryView {
                         recent: recent_docs(),
                         templates,
-                        on_open: move |title| {
-                            doc_title.set(title);
+                        on_open: move |doc_id: String| {
+                            let selected_title = recent_docs()
+                                .iter()
+                                .find(|item| item.id == doc_id)
+                                .map(|item| item.title.clone())
+                                .unwrap_or_else(|| "Untitled".to_string());
+                            active_doc_id.set(Some(doc_id));
+                            doc_title.set(selected_title);
                             view.set(ActiveView::Editor);
                         },
                         on_create: move |_| {
@@ -68,6 +75,7 @@ pub fn Home() -> Element {
                                 .duration_since(SystemTime::UNIX_EPOCH)
                                 .unwrap_or(Duration::from_secs(0))
                                 .as_secs();
+                            active_doc_id.set(None);
                             doc_title.set(format!("Untitled {ts}"));
                             view.set(ActiveView::Editor);
                         },
@@ -79,6 +87,7 @@ pub fn Home() -> Element {
                 } else {
                     EditorView {
                         doc_title,
+                        active_doc_id,
                         vim_enabled,
                         vim_mode,
                         on_back: move |_| view.set(ActiveView::Library),

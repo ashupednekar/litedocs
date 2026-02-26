@@ -97,6 +97,7 @@ fn insert_value_textarea(value: &str) {
 #[component]
 pub fn EditorView(
     mut doc_title: Signal<String>,
+    active_doc_id: Signal<Option<String>>,
     vim_enabled: Signal<bool>,
     vim_mode: Signal<VimMode>,
     on_back: EventHandler<()>,
@@ -223,7 +224,8 @@ pub fn EditorView(
     // Load local draft when the active document title changes.
     use_effect(move || {
         let title = doc_title();
-        let doc_id = doc_id_from_title(&title);
+        let doc_id = active_doc_id()
+            .unwrap_or_else(|| doc_id_from_title(&title));
 
         match storage_for_load.read(&doc_id) {
             Ok(bytes) if !bytes.is_empty() => {
@@ -246,7 +248,8 @@ pub fn EditorView(
     use_effect(move || {
         let title = doc_title();
         let text = content();
-        let doc_id = doc_id_from_title(&title);
+        let doc_id = active_doc_id()
+            .unwrap_or_else(|| doc_id_from_title(&title));
         *save_revision.write() += 1;
         let revision = save_revision();
         autosave_status.set("Autosaving locally...".to_string());
