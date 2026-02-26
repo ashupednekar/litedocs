@@ -1,1 +1,1 @@
-pub mod storage;
+pub use crate::{DocId, DocTitle, LocalFileStorage, StoredDoc};

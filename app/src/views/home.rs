@@ -98,8 +98,8 @@ fn load_recent_docs(storage: &LocalFileStorage) -> Vec<DocItem> {
         .unwrap_or_default()
         .into_iter()
         .map(|doc| DocItem {
-            id: doc.id,
-            title: doc.title,
+            id: doc.id.to_string(),
+            title: doc.title.to_string(),
             meta: format_updated(doc.updated_at),
             location: "Local".to_string(),
         })

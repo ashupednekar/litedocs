@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use keyboard_types::Key;
-use litedocs_document::{FileStorage, LocalFileStorage};
+use litedocs_document::{doc_id_from_title, FileStorage, LocalFileStorage};
 use pulldown_cmark::{html, Options, Parser};
 use std::time::Duration;
 
@@ -223,7 +223,7 @@ pub fn EditorView(
     // Load local draft when the active document title changes.
     use_effect(move || {
         let title = doc_title();
-        let doc_id = LocalFileStorage::doc_id_from_title(&title);
+        let doc_id = doc_id_from_title(&title);
 
         match storage_for_load.read(&doc_id) {
             Ok(bytes) if !bytes.is_empty() => {
@@ -246,7 +246,7 @@ pub fn EditorView(
     use_effect(move || {
         let title = doc_title();
         let text = content();
-        let doc_id = LocalFileStorage::doc_id_from_title(&title);
+        let doc_id = doc_id_from_title(&title);
         *save_revision.write() += 1;
         let revision = save_revision();
         autosave_status.set("Autosaving locally...".to_string());

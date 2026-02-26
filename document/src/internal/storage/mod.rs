@@ -1,9 +1,76 @@
 use std::fs::{self, OpenOptions};
+use std::fmt;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::internal::naming::{doc_id_from_title, title_from_doc_id};
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DocId(String);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DocTitle(String);
+
+impl DocId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl DocTitle {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for DocId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for DocId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for DocTitle {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for DocTitle {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<DocTitle> for DocId {
+    fn from(value: DocTitle) -> Self {
+        Self(doc_id_from_title(&value.0))
+    }
+}
+
+impl From<DocId> for DocTitle {
+    fn from(value: DocId) -> Self {
+        Self(title_from_doc_id(&value.0))
+    }
+}
+
+impl fmt::Display for DocId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl fmt::Display for DocTitle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 pub trait FileStorage {
     fn read(&self, doc_id: &str) -> io::Result<Vec<u8>>;
@@ -24,7 +91,6 @@ pub trait FileStorage {
 
     fn delete(&self, doc_id: &str) -> io::Result<()>;
 
-    // Placeholder for future collaboration/sync pipeline.
     fn receive_remote_change(&self, _doc_id: &str, _offset: u64, _data: &[u8]) -> io::Result<()> {
         Ok(())
     }
@@ -32,8 +98,8 @@ pub trait FileStorage {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredDoc {
-    pub id: String,
-    pub title: String,
+    pub id: DocId,
+    pub title: DocTitle,
     pub updated_at: SystemTime,
 }
 
@@ -53,10 +119,6 @@ impl Default for LocalFileStorage {
 impl LocalFileStorage {
     pub fn new(root: PathBuf) -> Self {
         Self { root }
-    }
-
-    pub fn doc_id_from_title(title: &str) -> String {
-        doc_id_from_title(title)
     }
 
     fn docs_dir(&self) -> PathBuf {
@@ -128,13 +190,13 @@ impl FileStorage for LocalFileStorage {
                 continue;
             }
             let id = match path.file_stem().and_then(|stem| stem.to_str()) {
-                Some(stem) => stem.to_string(),
+                Some(stem) => DocId::from(stem),
                 None => continue,
             };
             let metadata = fs::metadata(&path)?;
             let updated_at = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
             docs.push(StoredDoc {
-                title: title_from_doc_id(&id),
+                title: DocTitle::from(id.clone()),
                 id,
                 updated_at,
             });

@@ -1,4 +1,4 @@
-pub(crate) fn doc_id_from_title(title: &str) -> String {
+pub fn doc_id_from_title(title: &str) -> String {
     let mut out = String::new();
     for ch in title.chars() {
         if ch.is_ascii_alphanumeric() {
@@ -16,7 +16,7 @@ pub(crate) fn doc_id_from_title(title: &str) -> String {
     }
 }
 
-pub(crate) fn title_from_doc_id(doc_id: &str) -> String {
+pub fn title_from_doc_id(doc_id: &str) -> String {
     let mut out = String::new();
     let mut capitalize = true;
     for ch in doc_id.chars() {
