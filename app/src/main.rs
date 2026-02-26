@@ -27,7 +27,7 @@ enum Route {
 
 // We can import assets in dioxus with the `asset!` macro. This macro takes a path to an asset relative to the crate root.
 // The macro returns an `Asset` type that will display as the path to the asset in the browser or a local path in desktop bundles.
-const FAVICON: Asset = asset!("/assets/favicon.ico");
+const LOGO_ICON: Asset = asset!("/assets/logo.svg");
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
@@ -47,7 +47,7 @@ fn App() -> Element {
     rsx! {
         // In addition to element and text (which we will see later), rsx can contain other components. In this case,
         // we are using the `document::Link` component to add a link to our favicon and main CSS file into the head of our app.
-        document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "icon", href: LOGO_ICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         // The router component renders the route enum we defined above. It will handle synchronization of the URL and render
         // the layouts and components for the active route.

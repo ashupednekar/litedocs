@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use litedocs_document::{doc_id_from_title, FileStorage, LocalFileStorage};
+use std::time::{Duration, SystemTime};
 
 use crate::components::{DocItem, EditorView, LibraryView, StatusBar, TemplateItem, TopBar, VimMode};
 
@@ -12,33 +14,14 @@ enum ActiveView {
 #[component]
 pub fn Home() -> Element {
     let mut view = use_signal(|| ActiveView::Library);
-    let mut doc_title = use_signal(|| "Design Spec — Litedocs".to_string());
-    let mut dark_mode = use_signal(|| false);
-    let mut vim_enabled = use_signal(|| false);
-    let mut vim_mode = use_signal(|| VimMode::Normal);
-
-    let recent_docs = vec![
-        DocItem {
-            title: "Product Narrative".to_string(),
-            meta: "Edited 12 min ago".to_string(),
-            location: "Local".to_string(),
-        },
-        DocItem {
-            title: "Litedocs Launch Plan".to_string(),
-            meta: "Edited 1 hour ago".to_string(),
-            location: "Local".to_string(),
-        },
-        DocItem {
-            title: "Research Synthesis".to_string(),
-            meta: "Edited yesterday".to_string(),
-            location: "Local".to_string(),
-        },
-        DocItem {
-            title: "Interview Notes".to_string(),
-            meta: "Edited Feb 19".to_string(),
-            location: "Local".to_string(),
-        },
-    ];
+    let mut doc_title = use_signal(|| "Untitled".to_string());
+    let mut active_doc_id = use_signal(|| Option::<String>::None);
+    let dark_mode = use_signal(|| false);
+    let vim_enabled = use_signal(|| false);
+    let vim_mode = use_signal(|| VimMode::Normal);
+    let mut recent_docs = use_signal(Vec::<DocItem>::new);
+    let storage = use_hook(LocalFileStorage::default);
+    let storage_for_load = storage.clone();
 
     let templates = vec![
         TemplateItem {
@@ -59,6 +42,12 @@ pub fn Home() -> Element {
         },
     ];
 
+    use_effect(move || {
+        let _ = view();
+        recent_docs.set(load_recent_docs(&storage_for_load));
+    });
+    let storage_for_delete = storage.clone();
+
     rsx! {
         div {
             class: if dark_mode() { "app-shell dark" } else { "app-shell" },
@@ -69,16 +58,40 @@ pub fn Home() -> Element {
                 class: "editor-area",
                 if view() == ActiveView::Library {
                     LibraryView {
-                        recent: recent_docs,
+                        recent: recent_docs(),
                         templates,
-                        on_open: move |title| {
+                        on_open: move |doc_id: String| {
+                            let selected_title = recent_docs()
+                                .iter()
+                                .find(|item| item.id == doc_id)
+                                .map(|item| item.title.clone())
+                                .unwrap_or_else(|| "Untitled".to_string());
+                            active_doc_id.set(Some(doc_id));
+                            doc_title.set(selected_title);
+                            view.set(ActiveView::Editor);
+                        },
+                        on_create: move |_| {
+                            let ts = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .unwrap_or(Duration::from_secs(0))
+                                .as_secs();
+                            let title = format!("Untitled {ts}");
+                            active_doc_id.set(Some(doc_id_from_title(&title)));
                             doc_title.set(title);
                             view.set(ActiveView::Editor);
+                        },
+                        on_delete: move |doc_id: String| {
+                            if let Err(err) = storage_for_delete.delete(&doc_id) {
+                                eprintln!("Failed to delete document {doc_id}: {err}");
+                            } else {
+                                recent_docs.set(load_recent_docs(&storage_for_delete));
+                            }
                         },
                     }
                 } else {
                     EditorView {
                         doc_title,
+                        active_doc_id,
                         vim_enabled,
                         vim_mode,
                         on_back: move |_| view.set(ActiveView::Library),
@@ -89,5 +102,42 @@ pub fn Home() -> Element {
             StatusBar { vim_enabled, vim_mode }
         }
 
+    }
+}
+
+fn load_recent_docs(storage: &LocalFileStorage) -> Vec<DocItem> {
+    storage
+        .list_docs()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|doc| DocItem {
+            id: doc.id.to_string(),
+            title: doc.title.to_string(),
+            meta: format_updated(doc.updated_at),
+            location: "Local".to_string(),
+        })
+        .collect()
+}
+
+fn format_updated(updated_at: SystemTime) -> String {
+    let now = SystemTime::now();
+    match now.duration_since(updated_at) {
+        Ok(age) if age.as_secs() < 60 => "Edited just now".to_string(),
+        Ok(age) if age.as_secs() < 3600 => {
+            let minutes = age.as_secs() / 60;
+            let unit = if minutes == 1 { "minute" } else { "minutes" };
+            format!("Edited {minutes} {unit} ago")
+        }
+        Ok(age) if age.as_secs() < 86_400 => {
+            let hours = age.as_secs() / 3600;
+            let unit = if hours == 1 { "hour" } else { "hours" };
+            format!("Edited {hours} {unit} ago")
+        }
+        Ok(age) => {
+            let days = age.as_secs() / 86_400;
+            let unit = if days == 1 { "day" } else { "days" };
+            format!("Edited {days} {unit} ago")
+        }
+        Err(_) => "Edited recently".to_string(),
     }
 }

@@ -17,11 +17,14 @@ pub fn StatusBar(vim_enabled: Signal<bool>, vim_mode: Signal<VimMode>) -> Elemen
     rsx! {
         footer {
             class: "statusbar",
-            div { "Local-first mode" }
             div {
-                if vim_enabled() { "Vim: {mode_label}" } else { "Vim: off" }
+                class: "statusbar-inner",
+                div { "Local-first mode" }
+                div {
+                    if vim_enabled() { "Vim: {mode_label}" } else { "Vim: off" }
+                }
+                div { "Sync: not connected" }
             }
-            div { "Sync: not connected" }
         }
     }
 }
