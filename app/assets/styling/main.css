@@ -35,7 +35,7 @@ button {
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 72px 1fr 36px;
+  grid-template-rows: auto 1fr 36px;
   background:
     radial-gradient(circle at top left, var(--bg-glow) 0%, rgba(255, 255, 255, 0) 45%),
     radial-gradient(circle at 20% 30%, var(--bg) 0%, rgba(248, 241, 228, 0) 55%),
@@ -66,12 +66,23 @@ button {
 .topbar {
   grid-column: 1 / -1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 28px;
+  justify-content: center;
+  padding: 3px 10px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(16px);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.topbar-inner {
+  width: min(1240px, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
 }
 
 .app-shell.dark .topbar,
@@ -86,9 +97,9 @@ button {
 }
 
 .mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
   background: linear-gradient(140deg, var(--accent), var(--accent-deep));
   box-shadow: 0 8px 18px rgba(17, 17, 17, 0.35);
 }
@@ -100,25 +111,21 @@ button {
 
 .brand-name {
   font-weight: 700;
-  letter-spacing: 0.4px;
-}
-
-.brand-sub {
-  font-size: 12px;
-  color: var(--muted);
+  letter-spacing: 0.2px;
+  font-size: 20px;
 }
 
 .top-search {
   flex: 1;
-  max-width: 520px;
-  margin: 0 32px;
+  max-width: 460px;
+  margin: 0 14px;
 }
 
 .top-search input {
   width: 100%;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 10px 18px;
+  padding: 8px 14px;
   background: rgba(255, 255, 255, 0.85);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink);
@@ -132,7 +139,82 @@ button {
 .top-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.top-actions button {
+  padding: 6px;
+  font-size: 13px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  position: relative;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.vim-mark {
+  width: 16px;
+  height: 16px;
+  display: block;
+  opacity: 0.62;
+}
+
+.vim-toggle.is-on .vim-mark {
+  opacity: 1;
+}
+
+.app-shell.dark .vim-mark {
+  filter: invert(1) brightness(1.2);
+}
+
+.icon-active {
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.app-shell.dark .icon-active {
+  background: rgba(244, 244, 245, 0.16);
+  border-color: rgba(244, 244, 245, 0.24);
+}
+
+.vim-toggle.is-on {
+  color: #22c55e;
+}
+
+.vim-toggle.is-off {
+  color: var(--muted);
+}
+
+.state-dot {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px var(--line), 0 0 0 2px rgba(0, 0, 0, 0.16);
+}
+
+.vim-toggle.is-on .state-dot {
+  background: #22c55e;
+}
+
+.vim-toggle.is-off .state-dot {
+  background: #6b7280;
+}
+
+.app-shell.dark .vim-toggle.is-off .state-dot {
+  background: #9ca3af;
 }
 
 .sync-pill {
@@ -193,7 +275,7 @@ button.ghost {
 }
 
 .editor-area > * {
-  width: min(980px, 100%);
+  width: min(1240px, 100%);
 }
 
 .library-view {
@@ -234,6 +316,11 @@ button.ghost {
   box-shadow: 0 8px 16px rgba(17, 17, 17, 0.2);
 }
 
+.app-shell.dark .pill {
+  background: #e5e7eb;
+  color: #111827;
+}
+
 .pill.secondary {
   background: rgba(255, 255, 255, 0.85);
   color: var(--ink);
@@ -259,6 +346,10 @@ button.ghost {
   background: rgba(255, 255, 255, 0.8);
   border: 1px solid transparent;
   transition: border 0.2s ease, transform 0.2s ease;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .app-shell.dark .doc-card {
@@ -278,6 +369,38 @@ button.ghost {
 .doc-meta {
   font-size: 12px;
   color: var(--muted);
+}
+
+.doc-open {
+  text-align: left;
+  padding: 0;
+  border-radius: 0;
+  width: 100%;
+}
+
+.doc-delete {
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+}
+
+.doc-delete:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.empty-state {
+  padding: 24px;
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.app-shell.dark .empty-state {
+  background: rgba(18, 19, 22, 0.55);
 }
 
 .storage {
@@ -313,6 +436,12 @@ button.ghost {
   gap: 10px;
 }
 
+.compact-back {
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .doc-title-input {
   font-size: 32px;
   font-weight: 700;
@@ -343,6 +472,7 @@ button.ghost {
 .toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   background: rgba(255, 255, 255, 0.9);
   border-radius: 999px;
@@ -354,6 +484,7 @@ button.ghost {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .doc-select {
@@ -362,6 +493,7 @@ button.ghost {
   border-radius: 10px;
   padding: 6px 10px;
   color: var(--ink);
+  max-width: 180px;
 }
 
 .app-shell.dark .doc-select {
@@ -418,6 +550,7 @@ button.ghost {
   padding: 2px;
   background: rgba(0, 0, 0, 0.06);
   border-radius: 999px;
+  min-width: 0;
 }
 
 .toggle-group button {
@@ -459,6 +592,7 @@ button.ghost {
   gap: 16px;
   animation: reveal 0.6s ease forwards;
   color: var(--ink);
+  width: 100%;
 }
 
 .page-header {
@@ -645,13 +779,158 @@ button.ghost {
 .statusbar {
   grid-column: 1 / -1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 24px;
+  justify-content: center;
+  padding: 0 12px;
   font-size: 12px;
   color: var(--muted);
   border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.7);
+}
+
+.statusbar-inner {
+  width: min(1240px, 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.auth-modal {
+  width: min(420px, 100%);
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-header {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.auth-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auth-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.auth-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ink);
+}
+
+.app-shell.dark .auth-input {
+  background: rgba(18, 19, 22, 0.88);
+}
+
+.auth-input.file {
+  padding: 6px;
+}
+
+.auth-file-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crop-wrap {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.crop-frame {
+  width: 130px;
+  height: 130px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  position: relative;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.crop-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.crop-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center center;
+}
+
+.crop-selection {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 86px;
+  height: 86px;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  outline: 9999px solid rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  resize: both;
+  overflow: hidden;
+  min-width: 46px;
+  min-height: 46px;
+  max-width: 122px;
+  max-height: 122px;
+}
+
+.crop-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 8px;
+}
+
+.crop-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.crop-apply {
+  justify-self: start;
+  margin-top: 2px;
+}
+
+.auth-actions {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 @keyframes rise {
@@ -677,26 +956,51 @@ button.ghost {
 }
 
 @media (max-width: 900px) {
+  .app-shell {
+    grid-template-rows: auto 1fr auto;
+  }
+
   .topbar {
-    flex-direction: column;
-    gap: 12px;
     padding: 16px;
   }
 
+  .topbar-inner {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand {
+    justify-content: flex-start;
+  }
+
+  .brand-name {
+    font-size: 16px;
+  }
+
   .top-search {
-    width: 100%;
-    margin: 0;
+    order: 0;
+    width: auto;
+    margin: 0 10px;
+    max-width: 380px;
   }
 
   .top-actions {
-    flex-wrap: wrap;
-    justify-content: center;
+    order: 0;
+    width: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .statusbar {
+    padding: 8px 12px;
+  }
+
+  .statusbar-inner {
     flex-direction: column;
     gap: 6px;
-    padding: 8px 12px;
   }
 
   .doc-actions,
@@ -707,7 +1011,8 @@ button.ghost {
   }
 
   .editor-area {
-    padding: 20px 18px 28px;
+    padding: 16px 12px 24px;
+    gap: 14px;
   }
 
   .doc-title-input {
@@ -715,13 +1020,15 @@ button.ghost {
   }
 
   .toolbar {
-    gap: 6px;
-    padding: 10px 12px;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 16px;
   }
 
   .toggle-group {
-    width: 100%;
-    justify-content: space-between;
+    width: auto;
+    max-width: 100%;
   }
 
   .table-picker {
@@ -735,15 +1042,66 @@ button.ghost {
 
   .doc-select {
     width: 100%;
+    max-width: none;
   }
 
   .doc-color {
-    width: 100%;
+    width: 48px;
     height: 32px;
   }
 
   .doc-surface,
   .editor-text {
     font-size: 16px;
+  }
+
+  .page {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  .page-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .brand-sub {
+    display: none;
+  }
+
+  .doc-actions {
+    gap: 6px;
+  }
+
+  .doc-actions button {
+    padding: 6px 10px;
+  }
+
+  .toolbar-divider {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .top-search {
+    width: 100%;
+    margin: 0;
+    max-width: none;
+  }
+
+  .top-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .brand {
+    justify-content: center;
   }
 }
