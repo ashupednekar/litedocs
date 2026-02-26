@@ -6,6 +6,8 @@ use views::Home;
 
 /// Define a components module that contains all shared components for our app.
 mod components;
+/// Define internal modules for storage and future sync plumbing.
+mod internal;
 /// Define a views module that contains the UI for all Layouts and Routes for our app.
 mod views;
 

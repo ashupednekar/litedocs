@@ -10,6 +10,7 @@ edition = "2021"
 dioxus = { version = "0.7.1", features = ["router"] }
 pulldown-cmark = "0.11"
 html2md = "0.2"
+tokio = { version = "1", features = ["time"] }
 
 [features]
 default = ["desktop"]

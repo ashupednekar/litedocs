@@ -1,8 +1,12 @@
 use dioxus::prelude::*;
 use keyboard_types::Key;
 use pulldown_cmark::{html, Options, Parser};
+use std::time::Duration;
 
 use crate::components::VimMode;
+use crate::internal::files::{FileStorage, LocalFileStorage};
+
+const DEFAULT_DOC_CONTENT: &str = "## Overview\n\nStart writing in **Markdown**. Preview updates live below.\n\n- Local-first notes\n- Vim motions (when enabled)\n- Clean export\n\n> Tip: Use headings and lists to structure ideas.\n";
 
 fn js_escape(input: &str) -> String {
     input
@@ -104,9 +108,10 @@ pub fn EditorView(
     let mut font_family = use_signal(|| "Roboto".to_string());
     let mut font_color = use_signal(|| "#e5e7eb".to_string());
     let mut pending_dd = use_signal(|| false);
-    let mut content = use_signal(|| {
-        "## Overview\n\nStart writing in **Markdown**. Preview updates live below.\n\n- Local-first notes\n- Vim motions (when enabled)\n- Clean export\n\n> Tip: Use headings and lists to structure ideas.\n".to_string()
-    });
+    let mut content = use_signal(|| DEFAULT_DOC_CONTENT.to_string());
+    let mut autosave_status = use_signal(|| "Autosaving locally".to_string());
+    let mut save_revision = use_signal(|| 0_u64);
+    let storage = use_hook(LocalFileStorage::default);
     let mut insert_markdown_owned = move |value: String| {
         if rich_mode() {
             let mut text = content();
@@ -211,6 +216,58 @@ pub fn EditorView(
 })();"#,
         );
     };
+
+    let storage_for_load = storage.clone();
+    let storage_for_save = storage.clone();
+
+    // Load local draft when the active document title changes.
+    use_effect(move || {
+        let title = doc_title();
+        let doc_id = LocalFileStorage::doc_id_from_title(&title);
+
+        match storage_for_load.read(&doc_id) {
+            Ok(bytes) if !bytes.is_empty() => {
+                if let Ok(text) = String::from_utf8(bytes) {
+                    content.set(text);
+                    autosave_status.set("Loaded local draft".to_string());
+                }
+            }
+            Ok(_) => {
+                content.set(DEFAULT_DOC_CONTENT.to_string());
+                autosave_status.set("Autosaving locally".to_string());
+            }
+            Err(err) => {
+                autosave_status.set(format!("Load failed: {err}"));
+            }
+        }
+    });
+
+    // Debounced local-first autosave after user inactivity.
+    use_effect(move || {
+        let title = doc_title();
+        let text = content();
+        let doc_id = LocalFileStorage::doc_id_from_title(&title);
+        *save_revision.write() += 1;
+        let revision = save_revision();
+        autosave_status.set("Autosaving locally...".to_string());
+
+        let mut autosave_status = autosave_status;
+        let save_revision = save_revision;
+        let storage = storage_for_save.clone();
+
+        spawn(async move {
+            tokio::time::sleep(Duration::from_millis(900)).await;
+            if save_revision() != revision {
+                return;
+            }
+
+            match storage.write_full(&doc_id, text.as_bytes()) {
+                Ok(()) => autosave_status.set("Saved locally".to_string()),
+                Err(err) => autosave_status.set(format!("Save failed: {err}")),
+            }
+        });
+    });
+
     let html_text = markdown_to_html(&content());
     use_effect(move || {
         if !rich_mode() {
@@ -230,17 +287,15 @@ pub fn EditorView(
         }
     });
     rsx! {
-        div { class: "breadcrumbs", "Library / Product / Design Spec" }
+        div { class: "breadcrumbs", "Library / {doc_title().to_uppercase()}" }
         div {
             class: "doc-header",
             div { class: "doc-actions",
                 button {
-                    class: "ghost",
+                    class: "ghost compact-back",
                     onclick: move |_| on_back.call(()),
                     "← Back to library"
                 }
-                button { class: "ghost", "New doc" }
-                button { class: "ghost", "Sync now" }
             }
             input {
                 class: "doc-title-input",
@@ -419,7 +474,7 @@ pub fn EditorView(
         div { class: "page",
             div { class: "page-header",
                 span { class: "page-label", "Draft" }
-                span { class: "page-status", "Autosaving locally" }
+                span { class: "page-status", "{autosave_status}" }
             }
             if rich_mode() {
                 div {

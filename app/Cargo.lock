@@ -2586,6 +2586,7 @@ dependencies = [
  "dioxus",
  "html2md",
  "pulldown-cmark",
+ "tokio",
 ]
 
 [[package]]
