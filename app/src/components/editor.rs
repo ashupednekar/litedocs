@@ -47,10 +47,58 @@ fn markdown_to_html(markdown: &str) -> String {
     html_out
 }
 
-const READ_DOC_SURFACE_HTML_JS: &str = r#"(function() {
+/// Push rendered HTML into `#doc-surface` and return the same HTML string for `last_html` sync.
+fn apply_markdown_to_doc_surface_dom(markdown: &str) -> String {
+    let html = markdown_to_html(markdown);
+    let html_js = js_escape(&html);
+    // No IIFE: desktop eval wraps this in an async function; only `return` at top level sends a value back.
+    let _ = document::eval(&format!(
+        r#"
   const el = document.getElementById("doc-surface");
-  return el ? el.innerHTML : "";
-})()"#;
+  if (!el) return;
+  el.innerHTML = "{html_js}";
+  try {{ document.execCommand("styleWithCSS", false, false); }} catch (e) {{}}
+"#,
+        html_js = html_js
+    ));
+    html
+}
+
+/// Read `#doc-surface` HTML for html2md. Browsers often emit `<span style="font-weight:...">` for bold;
+/// html2md only maps `<b>` / `<strong>`, so we normalize spans before conversion.
+///
+/// Must use top-level `return` (no IIFE): Dioxus desktop wraps this in `async function (dioxus) { ... }`;
+/// an IIFE's result is discarded, so `.join::<String>()` would get `undefined` and deserialization fails.
+const READ_DOC_SURFACE_HTML_JS: &str = r#"
+  const el = document.getElementById("doc-surface");
+  if (!el) return "";
+  try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
+  const spans = Array.from(el.querySelectorAll("span[style]")).reverse();
+  for (const span of spans) {
+    if (!span.parentNode) continue;
+    const fw = (span.style.fontWeight || "").toLowerCase();
+    const fs = (span.style.fontStyle || "").toLowerCase();
+    const n = parseInt(fw, 10);
+    const bold = fw === "bold" || fw === "700" || fw === "bolder" || (!isNaN(n) && n >= 600);
+    const italic = fs === "italic" || fs === "oblique";
+    if (bold && italic) {
+      const strong = document.createElement("strong");
+      const em = document.createElement("em");
+      span.parentNode.replaceChild(strong, span);
+      strong.appendChild(em);
+      while (span.firstChild) em.appendChild(span.firstChild);
+    } else if (bold) {
+      const strong = document.createElement("strong");
+      span.parentNode.replaceChild(strong, span);
+      while (span.firstChild) strong.appendChild(span.firstChild);
+    } else if (italic) {
+      const em = document.createElement("em");
+      span.parentNode.replaceChild(em, span);
+      while (span.firstChild) em.appendChild(span.firstChild);
+    }
+  }
+  return el.innerHTML;
+"#;
 
 fn insert_into_textarea(prefix: &str, suffix: &str, placeholder: &str) {
     let prefix = js_escape(prefix);
@@ -102,12 +150,13 @@ fn insert_value_textarea(value: &str) {
 #[component]
 pub fn EditorView(
     mut doc_title: Signal<String>,
-    active_doc_id: Signal<Option<String>>,
+    mut active_doc_id: Signal<Option<String>>,
     vim_enabled: Signal<bool>,
     vim_mode: Signal<VimMode>,
     on_back: EventHandler<()>,
 ) -> Element {
-    let mut rich_mode = use_signal(|| true);
+    // Markdown is the reliable path (textarea ↔ `content`). Rich mode depends on JS eval to read the DOM.
+    let mut rich_mode = use_signal(|| false);
     let mut show_table_picker = use_signal(|| false);
     let mut table_rows = use_signal(|| 3);
     let mut table_cols = use_signal(|| 3);
@@ -115,8 +164,10 @@ pub fn EditorView(
     let mut font_color = use_signal(|| "#e5e7eb".to_string());
     let mut pending_dd = use_signal(|| false);
     let mut content = use_signal(|| DEFAULT_DOC_CONTENT.to_string());
-    let mut autosave_status = use_signal(|| "Autosaving locally".to_string());
+    let mut autosave_status = use_signal(|| "Saved locally".to_string());
     let mut save_revision = use_signal(|| 0_u64);
+    // Bumps on every edit so debounced autosave runs even when rich-mode DOM lags the `content` signal.
+    let mut editor_dirty = use_signal(|| 0_u64);
     let stable_doc_id = use_signal(move || {
         active_doc_id()
             .unwrap_or_else(|| doc_id_from_title(&doc_title()))
@@ -127,12 +178,14 @@ pub fn EditorView(
             let mut text = content();
             text.push_str(&value);
             content.set(text);
+            editor_dirty.with_mut(|n| *n += 1);
             return;
         }
         insert_value_textarea(&value);
     };
-    let mut last_html = use_signal(String::new);
-    let exec_command = |cmd: &str, value: Option<&str>| {
+    let last_html = use_signal(String::new);
+    let mut editor_dirty_for_rich = editor_dirty.clone();
+    let mut exec_command = move |cmd: &str, value: Option<&str>| {
         let cmd = js_escape(cmd);
         let value = value.map(js_escape).unwrap_or_default();
         document::eval(&format!(
@@ -145,8 +198,10 @@ pub fn EditorView(
             cmd = cmd,
             value = value
         ));
+        editor_dirty_for_rich.with_mut(|n| *n += 1);
     };
-    let insert_rich_html = |html: &str| {
+    let mut editor_dirty_for_insert = editor_dirty.clone();
+    let mut insert_rich_html = move |html: &str| {
         let html = js_escape(html);
         document::eval(&format!(
             r#"(function() {{
@@ -157,6 +212,7 @@ pub fn EditorView(
 }})();"#,
             html = html
         ));
+        editor_dirty_for_insert.with_mut(|n| *n += 1);
     };
     let vim_move = |direction: &str, granularity: &str, extend: bool| {
         let direction = js_escape(direction);
@@ -231,6 +287,7 @@ pub fn EditorView(
     let storage_for_save = storage.clone();
     let storage_for_back = storage.clone();
     let storage_for_manual = storage.clone();
+    let storage_for_title_rename = storage.clone();
     let manual_save = {
         let storage = storage_for_manual.clone();
         let stable_doc_id = stable_doc_id;
@@ -249,13 +306,28 @@ pub fn EditorView(
 
             spawn(async move {
                 if rich {
-                    if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
+                    match document::eval(READ_DOC_SURFACE_HTML_JS)
                         .join::<String>()
                         .await
                     {
-                        last_html.set(html_value.clone());
-                        snapshot = html2md::parse_html(&html_value);
-                        content_signal.set(snapshot.clone());
+                        Ok(html_value) => {
+                            let trimmed = html_value.trim();
+                            let emptyish = trimmed.is_empty()
+                                || trimmed.eq_ignore_ascii_case("<br>")
+                                || trimmed.eq_ignore_ascii_case("<br/>")
+                                || trimmed == "<div><br></div>"
+                                || trimmed == "<br><br>";
+                            if emptyish && !snapshot.trim().is_empty() {
+                                // keep snapshot (markdown buffer)
+                            } else {
+                                last_html.set(html_value.clone());
+                                snapshot = html2md::parse_html(&html_value);
+                                content_signal.set(snapshot.clone());
+                            }
+                        }
+                        Err(_) => {
+                            // keep snapshot
+                        }
                     }
                 }
 
@@ -267,21 +339,36 @@ pub fn EditorView(
         }
     };
 
-    // Load local draft when the active document title changes.
+    // Load local draft when the document id changes (not when the title field is edited).
+    let mut last_html_for_load = last_html.clone();
     use_effect(move || {
-        let _ = doc_title();
         let doc_id = stable_doc_id();
 
         match storage_for_load.read(&doc_id) {
             Ok(bytes) if !bytes.is_empty() => {
                 if let Ok(text) = String::from_utf8(bytes) {
-                    content.set(text);
+                    content.set(text.clone());
                     autosave_status.set("Loaded local draft".to_string());
+                    if rich_mode() {
+                        spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                            let html = apply_markdown_to_doc_surface_dom(&text);
+                            last_html_for_load.set(html);
+                        });
+                    }
                 }
             }
             Ok(_) => {
-                content.set(DEFAULT_DOC_CONTENT.to_string());
-                autosave_status.set("Autosaving locally".to_string());
+                let default = DEFAULT_DOC_CONTENT.to_string();
+                content.set(default.clone());
+                autosave_status.set("New draft".to_string());
+                if rich_mode() {
+                    spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                        let html = apply_markdown_to_doc_surface_dom(&default);
+                        last_html_for_load.set(html);
+                    });
+                }
             }
             Err(err) => {
                 autosave_status.set(format!("Load failed: {err}"));
@@ -292,14 +379,14 @@ pub fn EditorView(
     // Debounced local-first autosave after user inactivity.
     use_effect(move || {
         let _ = doc_title();
-        let text = content();
+        let _ = editor_dirty();
+        let _ = content();
         let doc_id = stable_doc_id();
         let rich = rich_mode();
         let revision = save_revision.with_mut(|rev| {
             *rev += 1;
             *rev
         });
-        autosave_status.set("Autosaving locally...".to_string());
 
         let mut autosave_status = autosave_status;
         let save_revision = save_revision;
@@ -313,45 +400,51 @@ pub fn EditorView(
                 return;
             }
 
-            let mut payload = text;
+            // Read after debounce so toolbar/execCommand edits are reflected in `content` (oninput)
+            // and we don't snapshot stale markdown from when the effect first ran.
+            let mut payload = content();
+            let mut used_rich_fallback = false;
             if rich {
-                if let Ok(html_value) = document::eval(READ_DOC_SURFACE_HTML_JS)
+                match document::eval(READ_DOC_SURFACE_HTML_JS)
                     .join::<String>()
                     .await
                 {
-                    if html_value != last_html() {
-                        last_html.set(html_value.clone());
+                    Ok(html_value) => {
+                        let trimmed = html_value.trim();
+                        // Missing #doc-surface or empty WebView snapshot: keep last markdown buffer.
+                        let emptyish = trimmed.is_empty()
+                            || trimmed.eq_ignore_ascii_case("<br>")
+                            || trimmed.eq_ignore_ascii_case("<br/>")
+                            || trimmed == "<div><br></div>"
+                            || trimmed == "<br><br>";
+                        if emptyish && !payload.trim().is_empty() {
+                            used_rich_fallback = true;
+                        } else {
+                            last_html.set(html_value.clone());
+                            payload = html2md::parse_html(&html_value);
+                            content.set(payload.clone());
+                        }
                     }
-                    payload = html2md::parse_html(&html_value);
-                    content.set(payload.clone());
+                    Err(_) => {
+                        used_rich_fallback = true;
+                    }
                 }
             }
 
             match storage.write_full(&doc_id, payload.as_bytes()) {
-                Ok(()) => autosave_status.set("Saved locally".to_string()),
+                Ok(()) => {
+                    if used_rich_fallback && rich {
+                        autosave_status
+                            .set("Saved locally (markdown buffer; rich DOM was not readable)".to_string());
+                    } else {
+                        autosave_status.set("Saved locally".to_string());
+                    }
+                }
                 Err(err) => autosave_status.set(format!("Save failed: {err}")),
             }
         });
     });
 
-    let html_text = markdown_to_html(&content());
-    use_effect(move || {
-        if !rich_mode() {
-            return;
-        }
-        let html_text = markdown_to_html(&content());
-        if html_text != last_html() {
-            last_html.set(html_text.clone());
-            let html_js = js_escape(&html_text);
-            document::eval(&format!(
-                r#"(function() {{
-  const el = document.getElementById("doc-surface");
-  if (!el) return;
-  el.innerHTML = "{html_js}";
-}})();"#,
-            ));
-        }
-    });
     rsx! {
         div { class: "breadcrumbs", "Library / {doc_title().to_uppercase()}" }
         div {
@@ -403,6 +496,63 @@ pub fn EditorView(
                 r#type: "text",
                 value: doc_title(),
                 oninput: move |e| doc_title.set(e.value()),
+                onblur: move |_| {
+                    let new_title = doc_title();
+                    let new_id = doc_id_from_title(&new_title);
+                    let old_id = stable_doc_id();
+                    if new_id == old_id {
+                        return;
+                    }
+                    let storage = storage_for_title_rename.clone();
+                    let mut stable_doc_id = stable_doc_id;
+                    let mut active_doc_id = active_doc_id;
+                    let mut autosave_status = autosave_status.clone();
+                    let rich = rich_mode();
+                    let current_text = content();
+                    let mut content_sig = content.clone();
+                    let mut last_html_sig = last_html.clone();
+
+                    if rich {
+                        spawn(async move {
+                            let markdown = match document::eval(READ_DOC_SURFACE_HTML_JS)
+                                .join::<String>()
+                                .await
+                            {
+                                Ok(html_value) => {
+                                    last_html_sig.set(html_value.clone());
+                                    html2md::parse_html(&html_value)
+                                }
+                                Err(_) => current_text,
+                            };
+                            content_sig.set(markdown.clone());
+                            if let Err(err) = storage.write_full(&old_id, markdown.as_bytes()) {
+                                autosave_status.set(format!("Save failed: {err}"));
+                                return;
+                            }
+                            match storage.rename_doc(&old_id, &new_id) {
+                                Ok(()) => {
+                                    stable_doc_id.set(new_id.clone());
+                                    active_doc_id.set(Some(new_id));
+                                    autosave_status.set("Renamed document".to_string());
+                                }
+                                Err(err) => autosave_status.set(format!("Rename failed: {err}")),
+                            }
+                        });
+                    } else {
+                        if let Err(err) = storage.write_full(&old_id, current_text.as_bytes()) {
+                            autosave_status.set(format!("Save failed: {err}"));
+                            return;
+                        }
+                        match storage.rename_doc(&old_id, &new_id) {
+                            Ok(()) => {
+                                stable_doc_id.set(new_id.clone());
+                                active_doc_id.set(Some(new_id));
+                                autosave_status.set("Renamed document".to_string());
+                            }
+                            Err(err) => autosave_status.set(format!("Rename failed: {err}")),
+                        }
+                    }
+                },
             }
             div { class: "doc-meta-row",
                 span { class: "tag", "Local" }
@@ -525,7 +675,16 @@ pub fn EditorView(
                 }
                 button {
                     class: if rich_mode() { "active" } else { "" },
-                    onclick: move |_| rich_mode.set(true),
+                    onclick: move |_| {
+                        let text = content();
+                        let mut last_html_sig = last_html.clone();
+                        rich_mode.set(true);
+                        spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                            let html = apply_markdown_to_doc_surface_dom(&text);
+                            last_html_sig.set(html);
+                        });
+                    },
                     "Doc"
                 }
                 button {
@@ -611,7 +770,6 @@ pub fn EditorView(
                         class: "doc-surface",
                         id: "doc-surface",
                         contenteditable: "true",
-                        dangerous_inner_html: "{html_text}",
                         onkeydown: move |evt| {
                             if !vim_enabled() {
                                 return;
@@ -723,6 +881,7 @@ pub fn EditorView(
                             }
                         },
                         oninput: move |_| {
+                            editor_dirty.with_mut(|n| *n += 1);
                             let mut content = content;
                             let mut last_html = last_html;
                             spawn(async move {
@@ -730,11 +889,9 @@ pub fn EditorView(
                                 .join::<String>()
                                 .await
                                 {
-                                    if html_value != last_html() {
-                                        last_html.set(html_value.clone());
-                                        let markdown = html2md::parse_html(&html_value);
-                                        content.set(markdown);
-                                    }
+                                    last_html.set(html_value.clone());
+                                    let markdown = html2md::parse_html(&html_value);
+                                    content.set(markdown);
                                 }
                             });
                         },
@@ -906,7 +1063,10 @@ pub fn EditorView(
                             _ => {}
                         }
                     },
-                    oninput: move |evt| content.set(evt.value()),
+                    oninput: move |evt| {
+                        content.set(evt.value());
+                        editor_dirty.with_mut(|n| *n += 1);
+                    },
                     placeholder: "Start writing. Everything is saved locally as you type.\n\nIdeas:\n- Outline your goals\n- Add constraints\n- Draft the first paragraph",
                 }
             }

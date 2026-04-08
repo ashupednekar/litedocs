@@ -91,6 +91,14 @@ pub trait FileStorage {
 
     fn delete(&self, doc_id: &str) -> io::Result<()>;
 
+    /// Move a document to a new id (e.g. after the user renames the title). Default: unsupported.
+    fn rename_doc(&self, _from_id: &str, _to_id: &str) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "rename_doc not implemented",
+        ))
+    }
+
     fn receive_remote_change(&self, _doc_id: &str, _offset: u64, _data: &[u8]) -> io::Result<()> {
         Ok(())
     }
@@ -212,6 +220,25 @@ impl FileStorage for LocalFileStorage {
             fs::remove_file(path)?;
         }
         Ok(())
+    }
+
+    fn rename_doc(&self, from_id: &str, to_id: &str) -> io::Result<()> {
+        if from_id == to_id {
+            return Ok(());
+        }
+        let from_path = self.doc_path(from_id);
+        let to_path = self.doc_path(to_id);
+        if !from_path.exists() {
+            return Ok(());
+        }
+        if to_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "a document with that name already exists",
+            ));
+        }
+        Self::ensure_parent_dir(&to_path)?;
+        fs::rename(&from_path, &to_path)
     }
 }
 
