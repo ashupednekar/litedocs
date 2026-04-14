@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use litedocs_document::{doc_id_from_title, FileStorage, LocalFileStorage};
 use std::time::{Duration, SystemTime};
 
 use crate::components::{DocItem, EditorView, LibraryView, StatusBar, TemplateItem, TopBar, VimMode};
+use crate::util::doc_id_from_title;
 
 #[derive(Clone, PartialEq)]
 enum ActiveView {
@@ -20,8 +20,6 @@ pub fn Home() -> Element {
     let vim_enabled = use_signal(|| false);
     let vim_mode = use_signal(|| VimMode::Normal);
     let mut recent_docs = use_signal(Vec::<DocItem>::new);
-    let storage = use_hook(LocalFileStorage::default);
-    let storage_for_load = storage.clone();
 
     let templates = vec![
         TemplateItem {
@@ -41,12 +39,6 @@ pub fn Home() -> Element {
             description: "Goals, scope, milestones".to_string(),
         },
     ];
-
-    use_effect(move || {
-        let _ = view();
-        recent_docs.set(load_recent_docs(&storage_for_load));
-    });
-    let storage_for_delete = storage.clone();
 
     rsx! {
         div {
@@ -76,16 +68,25 @@ pub fn Home() -> Element {
                                 .unwrap_or(Duration::from_secs(0))
                                 .as_secs();
                             let title = format!("Untitled {ts}");
-                            active_doc_id.set(Some(doc_id_from_title(&title)));
+                            let id = doc_id_from_title(&title);
+                            recent_docs.with_mut(|docs| {
+                                docs.retain(|d| d.id != id);
+                                docs.insert(
+                                    0,
+                                    DocItem {
+                                        id: id.clone(),
+                                        title: title.clone(),
+                                        meta: "Just now".to_string(),
+                                        location: "This session".to_string(),
+                                    },
+                                );
+                            });
+                            active_doc_id.set(Some(id));
                             doc_title.set(title);
                             view.set(ActiveView::Editor);
                         },
                         on_delete: move |doc_id: String| {
-                            if let Err(err) = storage_for_delete.delete(&doc_id) {
-                                eprintln!("Failed to delete document {doc_id}: {err}");
-                            } else {
-                                recent_docs.set(load_recent_docs(&storage_for_delete));
-                            }
+                            recent_docs.with_mut(|docs| docs.retain(|d| d.id != doc_id));
                         },
                     }
                 } else {
@@ -102,42 +103,5 @@ pub fn Home() -> Element {
             StatusBar { vim_enabled, vim_mode }
         }
 
-    }
-}
-
-fn load_recent_docs(storage: &LocalFileStorage) -> Vec<DocItem> {
-    storage
-        .list_docs()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|doc| DocItem {
-            id: doc.id.to_string(),
-            title: doc.title.to_string(),
-            meta: format_updated(doc.updated_at),
-            location: "Local".to_string(),
-        })
-        .collect()
-}
-
-fn format_updated(updated_at: SystemTime) -> String {
-    let now = SystemTime::now();
-    match now.duration_since(updated_at) {
-        Ok(age) if age.as_secs() < 60 => "Edited just now".to_string(),
-        Ok(age) if age.as_secs() < 3600 => {
-            let minutes = age.as_secs() / 60;
-            let unit = if minutes == 1 { "minute" } else { "minutes" };
-            format!("Edited {minutes} {unit} ago")
-        }
-        Ok(age) if age.as_secs() < 86_400 => {
-            let hours = age.as_secs() / 3600;
-            let unit = if hours == 1 { "hour" } else { "hours" };
-            format!("Edited {hours} {unit} ago")
-        }
-        Ok(age) => {
-            let days = age.as_secs() / 86_400;
-            let unit = if days == 1 { "day" } else { "days" };
-            format!("Edited {days} {unit} ago")
-        }
-        Err(_) => "Edited recently".to_string(),
     }
 }

@@ -40,7 +40,7 @@ pub fn LibraryView(
             div { class: "library-section",
                 h4 { "Recent" }
                 if recent.is_empty() {
-                    div { class: "empty-state", "No local docs yet. Create one to get started." }
+                    div { class: "empty-state", "No docs in this session yet. Create one to get started." }
                 } else {
                     div { class: "doc-scroll",
                         div { class: "doc-grid",
@@ -74,13 +74,6 @@ pub fn LibraryView(
                             div { class: "doc-more", "Showing {limited_recent.len()} of {total_recent} · scroll to see earlier" }
                         }
                     }
-                }
-            }
-            div { class: "library-section",
-                h4 { "Storage" }
-                div { class: "storage",
-                    div { class: "storage-bar" }
-                    span { "2.4 GB of 10 GB used" }
                 }
             }
             div { class: "template-strip",

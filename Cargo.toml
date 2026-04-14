@@ -1,10 +1,5 @@
 [workspace]
-members = [
-  "app",
-  "document",
-  "server",
-  "website",
-]
+members = ["app"]
 resolver = "2"
 
 [workspace.package]

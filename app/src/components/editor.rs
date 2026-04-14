@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use keyboard_types::Key;
-use litedocs_document::{doc_id_from_title, FileStorage, LocalFileStorage};
 use pulldown_cmark::{html, Options, Parser};
 use std::time::Duration;
 
 use crate::components::VimMode;
+use crate::util::doc_id_from_title;
 
-const DEFAULT_DOC_CONTENT: &str = "## Overview\n\nStart writing in **Markdown**. Preview updates live below.\n\n- Local-first notes\n- Vim motions (when enabled)\n- Clean export\n\n> Tip: Use headings and lists to structure ideas.\n";
+const DEFAULT_DOC_CONTENT: &str = "## Overview\n\nStart writing in **Markdown**. Preview updates live below.\n\n- Vim motions (when enabled)\n- Clean export\n\n> Tip: Use headings and lists to structure ideas.\n";
 
 fn js_escape(input: &str) -> String {
     input
@@ -164,7 +164,7 @@ pub fn EditorView(
     let mut font_color = use_signal(|| "#e5e7eb".to_string());
     let mut pending_dd = use_signal(|| false);
     let mut content = use_signal(|| DEFAULT_DOC_CONTENT.to_string());
-    let mut autosave_status = use_signal(|| "Saved locally".to_string());
+    let mut autosave_status = use_signal(|| "Draft".to_string());
     let mut save_revision = use_signal(|| 0_u64);
     // Bumps on every edit so debounced autosave runs even when rich-mode DOM lags the `content` signal.
     let mut editor_dirty = use_signal(|| 0_u64);
@@ -172,7 +172,6 @@ pub fn EditorView(
         active_doc_id()
             .unwrap_or_else(|| doc_id_from_title(&doc_title()))
     });
-    let storage = use_hook(LocalFileStorage::default);
     let mut insert_markdown_owned = move |value: String| {
         if rich_mode() {
             let mut text = content();
@@ -283,25 +282,16 @@ pub fn EditorView(
         );
     };
 
-    let storage_for_load = storage.clone();
-    let storage_for_save = storage.clone();
-    let storage_for_back = storage.clone();
-    let storage_for_manual = storage.clone();
-    let storage_for_title_rename = storage.clone();
     let manual_save = {
-        let storage = storage_for_manual.clone();
-        let stable_doc_id = stable_doc_id;
         let autosave_status = autosave_status.clone();
         let mut content_signal = content.clone();
         let last_html_signal = last_html.clone();
         let rich_mode_signal = rich_mode.clone();
 
         move |_: MouseEvent| {
-            let doc_id = stable_doc_id();
             let rich = rich_mode_signal();
             let mut snapshot = content_signal();
             let mut autosave_status = autosave_status.clone();
-            let storage = storage.clone();
             let mut last_html = last_html_signal.clone();
 
             spawn(async move {
@@ -325,63 +315,37 @@ pub fn EditorView(
                                 content_signal.set(snapshot.clone());
                             }
                         }
-                        Err(_) => {
-                            // keep snapshot
-                        }
+                        Err(_) => {}
                     }
                 }
 
-                match storage.write_full(&doc_id, snapshot.as_bytes()) {
-                    Ok(()) => autosave_status.set("Saved locally".to_string()),
-                    Err(err) => autosave_status.set(format!("Save failed: {err}")),
-                }
+                autosave_status.set("Saved (in memory)".to_string());
             });
         }
     };
 
-    // Load local draft when the document id changes (not when the title field is edited).
+    // Reset editor when the active document id changes (persistence is wired by the app author).
     let mut last_html_for_load = last_html.clone();
     use_effect(move || {
-        let doc_id = stable_doc_id();
-
-        match storage_for_load.read(&doc_id) {
-            Ok(bytes) if !bytes.is_empty() => {
-                if let Ok(text) = String::from_utf8(bytes) {
-                    content.set(text.clone());
-                    autosave_status.set("Loaded local draft".to_string());
-                    if rich_mode() {
-                        spawn(async move {
-                            tokio::time::sleep(Duration::from_millis(1)).await;
-                            let html = apply_markdown_to_doc_surface_dom(&text);
-                            last_html_for_load.set(html);
-                        });
-                    }
-                }
-            }
-            Ok(_) => {
-                let default = DEFAULT_DOC_CONTENT.to_string();
-                content.set(default.clone());
-                autosave_status.set("New draft".to_string());
-                if rich_mode() {
-                    spawn(async move {
-                        tokio::time::sleep(Duration::from_millis(1)).await;
-                        let html = apply_markdown_to_doc_surface_dom(&default);
-                        last_html_for_load.set(html);
-                    });
-                }
-            }
-            Err(err) => {
-                autosave_status.set(format!("Load failed: {err}"));
-            }
+        let _ = stable_doc_id();
+        let default = DEFAULT_DOC_CONTENT.to_string();
+        content.set(default.clone());
+        autosave_status.set("Draft".to_string());
+        if rich_mode() {
+            spawn(async move {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                let html = apply_markdown_to_doc_surface_dom(&default);
+                last_html_for_load.set(html);
+            });
         }
     });
 
-    // Debounced local-first autosave after user inactivity.
+    // Debounced refresh of status after user inactivity (no persistence).
     use_effect(move || {
         let _ = doc_title();
         let _ = editor_dirty();
         let _ = content();
-        let doc_id = stable_doc_id();
+        let _ = stable_doc_id();
         let rich = rich_mode();
         let revision = save_revision.with_mut(|rev| {
             *rev += 1;
@@ -390,7 +354,6 @@ pub fn EditorView(
 
         let mut autosave_status = autosave_status;
         let save_revision = save_revision;
-        let storage = storage_for_save.clone();
         let mut content = content;
         let mut last_html = last_html;
 
@@ -400,8 +363,6 @@ pub fn EditorView(
                 return;
             }
 
-            // Read after debounce so toolbar/execCommand edits are reflected in `content` (oninput)
-            // and we don't snapshot stale markdown from when the effect first ran.
             let mut payload = content();
             let mut used_rich_fallback = false;
             if rich {
@@ -411,7 +372,6 @@ pub fn EditorView(
                 {
                     Ok(html_value) => {
                         let trimmed = html_value.trim();
-                        // Missing #doc-surface or empty WebView snapshot: keep last markdown buffer.
                         let emptyish = trimmed.is_empty()
                             || trimmed.eq_ignore_ascii_case("<br>")
                             || trimmed.eq_ignore_ascii_case("<br/>")
@@ -431,16 +391,10 @@ pub fn EditorView(
                 }
             }
 
-            match storage.write_full(&doc_id, payload.as_bytes()) {
-                Ok(()) => {
-                    if used_rich_fallback && rich {
-                        autosave_status
-                            .set("Saved locally (markdown buffer; rich DOM was not readable)".to_string());
-                    } else {
-                        autosave_status.set("Saved locally".to_string());
-                    }
-                }
-                Err(err) => autosave_status.set(format!("Save failed: {err}")),
+            if used_rich_fallback && rich {
+                autosave_status.set("In memory (markdown buffer; rich DOM was not readable)".to_string());
+            } else {
+                autosave_status.set("In memory".to_string());
             }
         });
     });
@@ -453,10 +407,7 @@ pub fn EditorView(
                 button {
                     class: "ghost compact-back",
                     onclick: move |_| {
-                        let doc_id = stable_doc_id();
                         let current_text = content();
-                        let mut autosave_status = autosave_status;
-                        let storage = storage_for_back.clone();
                         let on_back = on_back.clone();
 
                         if rich_mode() {
@@ -473,18 +424,10 @@ pub fn EditorView(
                                     }
                                     Err(_) => current_text,
                                 };
-                                content.set(markdown.clone());
-                                match storage.write_full(&doc_id, markdown.as_bytes()) {
-                                    Ok(()) => autosave_status.set("Saved locally".to_string()),
-                                    Err(err) => autosave_status.set(format!("Save failed: {err}")),
-                                }
+                                content.set(markdown);
                                 on_back.call(());
                             });
                         } else {
-                            match storage.write_full(&doc_id, current_text.as_bytes()) {
-                                Ok(()) => autosave_status.set("Saved locally".to_string()),
-                                Err(err) => autosave_status.set(format!("Save failed: {err}")),
-                            }
                             on_back.call(());
                         }
                     },
@@ -503,7 +446,6 @@ pub fn EditorView(
                     if new_id == old_id {
                         return;
                     }
-                    let storage = storage_for_title_rename.clone();
                     let mut stable_doc_id = stable_doc_id;
                     let mut active_doc_id = active_doc_id;
                     let mut autosave_status = autosave_status.clone();
@@ -524,40 +466,20 @@ pub fn EditorView(
                                 }
                                 Err(_) => current_text,
                             };
-                            content_sig.set(markdown.clone());
-                            if let Err(err) = storage.write_full(&old_id, markdown.as_bytes()) {
-                                autosave_status.set(format!("Save failed: {err}"));
-                                return;
-                            }
-                            match storage.rename_doc(&old_id, &new_id) {
-                                Ok(()) => {
-                                    stable_doc_id.set(new_id.clone());
-                                    active_doc_id.set(Some(new_id));
-                                    autosave_status.set("Renamed document".to_string());
-                                }
-                                Err(err) => autosave_status.set(format!("Rename failed: {err}")),
-                            }
+                            content_sig.set(markdown);
+                            stable_doc_id.set(new_id.clone());
+                            active_doc_id.set(Some(new_id));
+                            autosave_status.set("Renamed".to_string());
                         });
                     } else {
-                        if let Err(err) = storage.write_full(&old_id, current_text.as_bytes()) {
-                            autosave_status.set(format!("Save failed: {err}"));
-                            return;
-                        }
-                        match storage.rename_doc(&old_id, &new_id) {
-                            Ok(()) => {
-                                stable_doc_id.set(new_id.clone());
-                                active_doc_id.set(Some(new_id));
-                                autosave_status.set("Renamed document".to_string());
-                            }
-                            Err(err) => autosave_status.set(format!("Rename failed: {err}")),
-                        }
+                        stable_doc_id.set(new_id.clone());
+                        active_doc_id.set(Some(new_id));
+                        autosave_status.set("Renamed".to_string());
                     }
                 },
             }
             div { class: "doc-meta-row",
-                span { class: "tag", "Local" }
                 span { class: "tag", "Draft" }
-                span { class: "tag", "Last synced: —" }
             }
         }
         div { class: "toolbar",
